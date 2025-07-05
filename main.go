@@ -86,7 +86,7 @@ func eval(expr Expr, symbols map[string]Expr) (Expr, error) {
 		if a, ok := expr.(*Ap); ok && a.v != nil {
 			return a.v, nil
 		}
-		newExpr, err := evalInner2(expr, symbols)
+		newExpr, err := evalInner(expr, symbols)
 		if err != nil {
 			return nil, fmt.Errorf("error evaluating expression: %w", err)
 		}
@@ -104,7 +104,7 @@ func eval(expr Expr, symbols map[string]Expr) (Expr, error) {
 	}
 }
 
-func evalInner2(expr Expr, symbols map[string]Expr) (Expr, error) {
+func evalInner(expr Expr, symbols map[string]Expr) (Expr, error) {
 	fmt.Printf("Evaluating: %T %v %q\n", expr, expr, printExpr(expr))
 	// Walk down the left spine, pushing arguments to app onto a stack and then applying when we reach
 	// a function.
@@ -166,6 +166,32 @@ loop:
 				}
 				args = args[2:]
 				break loop
+			case "lt":
+				if len(args) < 2 {
+					return nil, fmt.Errorf("symbol 'lt' requires 2 arguments, got %d: %v", len(args), args)
+				}
+				var err error
+				expr, err = twoArgCall(args[0], args[1], symbols, func(left, right *Number) Expr {
+					if left.Value < right.Value {
+						return &Symbol{Name: "t"}
+					}
+					return &Symbol{Name: "f"}
+				})
+				if err != nil {
+					return nil, fmt.Errorf("error evaluating 'lt': %w", err)
+				}
+				args = args[2:]
+				break loop
+			case "neg":
+				e, err := call("neg", args, 1, symbols, func(vals ...*Number) Expr {
+					return &Number{Value: -vals[0].Value}
+				})
+				if err != nil {
+					return nil, fmt.Errorf("error evaluating 'neg': %w", err)
+				}
+				expr = e
+				args = args[1:]
+				break loop
 			case "s":
 				// ap ap ap s x0 x1 x2   =   ap ap x0 x2 ap x1 x2
 				if len(args) < 3 {
@@ -206,6 +232,41 @@ loop:
 				expr = args[1]
 				args = args[2:]
 				break loop
+			case "i":
+				// ap i x0  =   x0
+				if len(args) < 1 {
+					return nil, fmt.Errorf("symbol 'i' requires 1 argument, got %d: %v", len(args), args)
+				}
+				expr = args[0]
+				args = args[1:]
+				break loop
+			case "cons", "vec":
+				// ap ap ap cons x0 x1 x2   =   ap ap x2 x0 x1
+				if len(args) < 3 {
+					return nil, fmt.Errorf("symbol 'cons' requires 3 arguments, got %d: %v", len(args), args)
+				}
+				expr = &Ap{Left: &Ap{Left: args[2], Right: args[0]}, Right: args[1]}
+				args = args[3:]
+				break loop
+			case "nil":
+				// ap nil x0   =   t
+				if len(args) < 1 {
+					return nil, fmt.Errorf("symbol 'nil' requires 1 argument, got %d: %v", len(args), args)
+				}
+				expr = &Symbol{Name: "t"}
+				args = args[1:]
+				break loop
+			case "isnil":
+				if len(args) < 1 {
+					return nil, fmt.Errorf("symbol 'isnil' requires 1 argument, got %d: %v", len(args), args)
+				}
+				// TODO: Treat cons constuctions as their own type outside of raw functions?
+				if s, ok := args[0].(*Symbol); ok && s.Name == "nil" {
+					expr = &Symbol{Name: "t"}
+				} else {
+					expr = &Symbol{Name: "f"}
+				}
+				args = args[1:]
 			default:
 				return nil, fmt.Errorf("not yet implemented symbol: %s", e.Name)
 			}
@@ -244,68 +305,23 @@ func twoArgCall(x0, x1 Expr, symbols map[string]Expr, f func(left, right *Number
 	}
 }
 
-func evalInner(expr Expr, symbols map[string]Expr) (Expr, error) {
-	fmt.Printf("Evaluating: %T %v\n", expr, expr)
-	switch e := expr.(type) {
-	case *Number:
-		return e, nil
-	case *Symbol:
-		if val, ok := symbols[e.Name]; ok {
-			return val, nil
-		}
-		return e, nil
-	case *Ap:
-		if e.v != nil {
-			return e.v, nil
-		}
-		left, err := eval(e.Left, symbols)
-		if err != nil {
-			return nil, fmt.Errorf("error evaluating left side of application: %w", err)
-		}
-		switch l := left.(type) {
-		case *Number:
-			return nil, fmt.Errorf("left side of application is a number, expected a function: %v", l)
-		case *Symbol:
-			return nil, fmt.Errorf("not yet implemeneted handling of 1 arg symbol: %s", l.Name)
-		case *Ap:
-			switch l2 := l.Left.(type) {
-			case *Number:
-				return nil, fmt.Errorf("not yet implemeneted handling of application with number: %v", l2)
-			case *Symbol:
-				return nil, fmt.Errorf("not yet implemeneted handling of 2 arg symbol: %s", l2.Name)
-			case *Ap:
-				switch l3 := l2.Left.(type) {
-				case *Number:
-					return nil, fmt.Errorf("not yet implemeneted handling of application with number: %v", l3)
-				case *Symbol:
-					x0 := l2.Right
-					x1 := l.Right
-					x2 := e.Right
-					switch l3.Name {
-					case "s":
-						return &Ap{&Ap{x0, x2, nil}, &Ap{x1, x2, nil}, nil}, nil
-					case "k":
-						return nil, fmt.Errorf("not yet implemeneted handling of symbol: %s", l3.Name)
-					case "i":
-						return nil, fmt.Errorf("not yet implemeneted handling of symbol: %s", l3.Name)
-					default:
-						return nil, fmt.Errorf("unknown function: %s", l3.Name)
-					}
-				case *Ap:
-					return nil, fmt.Errorf("unexpected 4 args application: %v", l3)
-				default:
-					return nil, fmt.Errorf("unknown expression type: %T", l3)
-				}
-			default:
-				return nil, fmt.Errorf("unknown expression type: %T", l2)
-			}
-		default:
-			return nil, fmt.Errorf("unknown expression type: %T", l)
-		}
-
-	default:
-		return nil, fmt.Errorf("unknown expression type: %T", expr)
+func call(name string, args []Expr, n int, symbols map[string]Expr, f func(args ...*Number) Expr) (Expr, error) {
+	if len(args) < n {
+		return nil, fmt.Errorf("expected at least %d arguments for '%s', got %d: %v", n, name, len(args), args)
 	}
+	vals := make([]*Number, 0, n)
+	for i := 0; i < n; i++ {
+		v, err := eval(args[i], symbols)
+		if err != nil {
+			return nil, fmt.Errorf("error evaluating argument: %w", err)
+		}
+		if n, ok := v.(*Number); ok {
+			vals = append(vals, n)
+		} else {
+			return nil, fmt.Errorf("expected number argument, got: %v", v)
+		}
+	}
+	return f(vals...), nil
 }
 
 func doit() error {
