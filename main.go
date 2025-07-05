@@ -125,38 +125,28 @@ loop:
 			}
 			switch e.Name {
 			case "add":
-				if len(args) < 2 {
-					return nil, fmt.Errorf("symbol 'add' requires 2 arguments, got %d: %v", len(args), args)
-				}
-				var err error
-				expr, err = twoArgCall(args[0], args[1], symbols, func(left, right *Number) Expr {
-					return &Number{Value: left.Value + right.Value}
+				e, err := call("add", args, 2, symbols, func(vals ...*Number) Expr {
+					return &Number{Value: vals[0].Value + vals[1].Value}
 				})
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'add': %w", err)
 				}
+				expr = e
 				args = args[2:]
 				break loop
 			case "mul":
-				if len(args) < 2 {
-					return nil, fmt.Errorf("symbol 'mul' requires 2 arguments, got %d: %v", len(args), args)
-				}
-				var err error
-				expr, err = twoArgCall(args[0], args[1], symbols, func(left, right *Number) Expr {
-					return &Number{Value: left.Value * right.Value}
+				e, err := call("mul", args, 2, symbols, func(vals ...*Number) Expr {
+					return &Number{Value: vals[0].Value * vals[1].Value}
 				})
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'mul': %w", err)
 				}
+				expr = e
 				args = args[2:]
 				break loop
 			case "eq":
-				if len(args) < 2 {
-					return nil, fmt.Errorf("symbol 'eq' requires 2 arguments, got %d: %v", len(args), args)
-				}
-				var err error
-				expr, err = twoArgCall(args[0], args[1], symbols, func(left, right *Number) Expr {
-					if left.Value == right.Value {
+				e, err := call("eq", args, 2, symbols, func(vals ...*Number) Expr {
+					if vals[0].Value == vals[1].Value {
 						return &Symbol{Name: "t"}
 					}
 					return &Symbol{Name: "f"}
@@ -164,15 +154,12 @@ loop:
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'eq': %w", err)
 				}
+				expr = e
 				args = args[2:]
 				break loop
 			case "lt":
-				if len(args) < 2 {
-					return nil, fmt.Errorf("symbol 'lt' requires 2 arguments, got %d: %v", len(args), args)
-				}
-				var err error
-				expr, err = twoArgCall(args[0], args[1], symbols, func(left, right *Number) Expr {
-					if left.Value < right.Value {
+				e, err := call("lt", args, 2, symbols, func(vals ...*Number) Expr {
+					if vals[0].Value < vals[1].Value {
 						return &Symbol{Name: "t"}
 					}
 					return &Symbol{Name: "f"}
@@ -180,6 +167,7 @@ loop:
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'lt': %w", err)
 				}
+				expr = e
 				args = args[2:]
 				break loop
 			case "neg":
@@ -283,26 +271,6 @@ loop:
 		expr = &Ap{Left: expr, Right: arg}
 	}
 	return expr, nil
-}
-
-func twoArgCall(x0, x1 Expr, symbols map[string]Expr, f func(left, right *Number) Expr) (Expr, error) {
-	v0, err := eval(x0, symbols)
-	if err != nil {
-		return nil, fmt.Errorf("error evaluating first argument of 'mul': %w", err)
-	}
-	v1, err := eval(x1, symbols)
-	if err != nil {
-		return nil, fmt.Errorf("error evaluating second argument of 'mul': %w", err)
-	}
-	if n1, ok := v0.(*Number); ok {
-		if n2, ok := v1.(*Number); ok {
-			return f(n1, n2), nil
-		} else {
-			return nil, fmt.Errorf("expected number for second argument of 'mul', got: %v", v1)
-		}
-	} else {
-		return nil, fmt.Errorf("expected number for first argument of 'mul', got: %v", v0)
-	}
 }
 
 func call(name string, args []Expr, n int, symbols map[string]Expr, f func(args ...*Number) Expr) (Expr, error) {
