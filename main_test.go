@@ -12,7 +12,7 @@ func TestPowerOf2(t *testing.T) {
 
 	pwr2 := "ap ap s ap ap c ap eq 0 1 ap ap b ap mul 2 ap ap b pwr2 ap add -1"
 	e, _ := parseExpr(strings.Split(pwr2, " "))
-	symbols := map[string]Expr{
+	symbols := map[Symbol]Expr{
 		"pwr2": e,
 	}
 
@@ -49,7 +49,7 @@ func TestPowerOf2(t *testing.T) {
 		expr, _ := parseExpr([]string{"ap", "pwr2", strconv.FormatInt(testCase.input, 10)})
 		v, err := eval(expr, symbols)
 		assert.NoError(t, err)
-		assert.Equal(t, &Number{testCase.expected}, v)
+		assert.Equal(t, Number(testCase.expected), v)
 	}
 }
 
@@ -60,6 +60,6 @@ func TestGalaxy(t *testing.T) {
 	expr, _ := parseExpr([]string{"ap", "ap", "galaxy", "nil", "ap", "ap", "vec", "0", "0"})
 	v, err := eval(expr, symbols)
 	assert.NoError(t, err)
-	assert.Equal(t, &Number{0}, v)
+	assert.Equal(t, Number(0), v)
 
 }

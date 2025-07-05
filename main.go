@@ -8,6 +8,7 @@ import (
 )
 
 type Expr interface {
+	isExpr()
 }
 
 type Ap struct {
@@ -18,15 +19,17 @@ type Ap struct {
 	v Expr
 }
 
-type Number struct {
-	Value int64
-}
+func (a *Ap) isExpr() {}
 
-type Symbol struct {
-	Name string
-}
+type Number int64
 
-func parseProgram(path string) (map[string]Expr, error) {
+func (n Number) isExpr() {}
+
+type Symbol string
+
+func (s Symbol) isExpr() {}
+
+func parseProgram(path string) (map[Symbol]Expr, error) {
 	byts, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -34,13 +37,13 @@ func parseProgram(path string) (map[string]Expr, error) {
 
 	lines := strings.Split(string(byts), "\n")
 
-	symbols := map[string]Expr{}
+	symbols := map[Symbol]Expr{}
 	for _, line := range lines {
 		pieces := strings.Split(line, " = ")
 		if len(pieces) != 2 {
 			return nil, fmt.Errorf("invalid line: %s", line)
 		}
-		symbols[pieces[0]], _ = parseExpr(strings.Split(pieces[1], " "))
+		symbols[Symbol(pieces[0])], _ = parseExpr(strings.Split(pieces[1], " "))
 	}
 
 	return symbols, nil
@@ -61,18 +64,18 @@ func parseExpr(terms []string) (Expr, []string) {
 		return &Ap{Left: left, Right: right}, rest
 	default:
 		if num, err := strconv.ParseInt(token, 10, 64); err == nil {
-			return &Number{Value: num}, rest
+			return Number(num), rest
 		}
-		return &Symbol{Name: terms[0]}, rest
+		return Symbol(token), rest
 	}
 }
 
 func printExpr(expr Expr) string {
 	switch e := expr.(type) {
-	case *Number:
-		return fmt.Sprintf("%d", e.Value)
-	case *Symbol:
-		return e.Name
+	case Number:
+		return fmt.Sprintf("%d", e)
+	case Symbol:
+		return string(e)
 	case *Ap:
 		return fmt.Sprintf("ap %s %s", printExpr(e.Left), printExpr(e.Right))
 	default:
@@ -80,7 +83,7 @@ func printExpr(expr Expr) string {
 	}
 }
 
-func eval(expr Expr, symbols map[string]Expr) (Expr, error) {
+func eval(expr Expr, symbols map[Symbol]Expr) (Expr, error) {
 	originalExpr := expr
 	for {
 		if a, ok := expr.(*Ap); ok && a.v != nil {
@@ -104,7 +107,7 @@ func eval(expr Expr, symbols map[string]Expr) (Expr, error) {
 	}
 }
 
-func evalInner(expr Expr, symbols map[string]Expr) (Expr, error) {
+func evalInner(expr Expr, symbols map[Symbol]Expr) (Expr, error) {
 	fmt.Printf("Evaluating: %T %v %q\n", expr, expr, printExpr(expr))
 	// Walk down the left spine, pushing arguments to app onto a stack and then applying when we reach
 	// a function.
@@ -113,20 +116,20 @@ loop:
 	for {
 		fmt.Printf("Walking down: %T %v %q %v\n", expr, expr, printExpr(expr), args)
 		switch e := expr.(type) {
-		case *Number:
+		case Number:
 			if len(args) > 0 {
-				return nil, fmt.Errorf("unexpected number %v with args %v", e.Value, args)
+				return nil, fmt.Errorf("unexpected number %v with args %v", e, args)
 			}
 			return e, nil
-		case *Symbol:
-			if val, ok := symbols[e.Name]; ok {
+		case Symbol:
+			if val, ok := symbols[e]; ok {
 				expr = val
 				continue
 			}
-			switch e.Name {
+			switch e {
 			case "add":
-				e, err := call("add", args, 2, symbols, func(vals ...*Number) Expr {
-					return &Number{Value: vals[0].Value + vals[1].Value}
+				e, err := call("add", args, 2, symbols, func(vals ...Number) Expr {
+					return Number(vals[0] + vals[1])
 				})
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'add': %w", err)
@@ -135,8 +138,8 @@ loop:
 				args = args[2:]
 				break loop
 			case "mul":
-				e, err := call("mul", args, 2, symbols, func(vals ...*Number) Expr {
-					return &Number{Value: vals[0].Value * vals[1].Value}
+				e, err := call("mul", args, 2, symbols, func(vals ...Number) Expr {
+					return Number(vals[0] * vals[1])
 				})
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'mul': %w", err)
@@ -145,11 +148,11 @@ loop:
 				args = args[2:]
 				break loop
 			case "eq":
-				e, err := call("eq", args, 2, symbols, func(vals ...*Number) Expr {
-					if vals[0].Value == vals[1].Value {
-						return &Symbol{Name: "t"}
+				e, err := call("eq", args, 2, symbols, func(vals ...Number) Expr {
+					if vals[0] == vals[1] {
+						return Symbol("t")
 					}
-					return &Symbol{Name: "f"}
+					return Symbol("f")
 				})
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'eq': %w", err)
@@ -158,11 +161,11 @@ loop:
 				args = args[2:]
 				break loop
 			case "lt":
-				e, err := call("lt", args, 2, symbols, func(vals ...*Number) Expr {
-					if vals[0].Value < vals[1].Value {
-						return &Symbol{Name: "t"}
+				e, err := call("lt", args, 2, symbols, func(vals ...Number) Expr {
+					if vals[0] < vals[1] {
+						return Symbol("t")
 					}
-					return &Symbol{Name: "f"}
+					return Symbol("f")
 				})
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'lt': %w", err)
@@ -171,8 +174,8 @@ loop:
 				args = args[2:]
 				break loop
 			case "neg":
-				e, err := call("neg", args, 1, symbols, func(vals ...*Number) Expr {
-					return &Number{Value: -vals[0].Value}
+				e, err := call("neg", args, 1, symbols, func(vals ...Number) Expr {
+					return Number(-vals[0])
 				})
 				if err != nil {
 					return nil, fmt.Errorf("error evaluating 'neg': %w", err)
@@ -241,7 +244,7 @@ loop:
 				if len(args) < 1 {
 					return nil, fmt.Errorf("symbol 'nil' requires 1 argument, got %d: %v", len(args), args)
 				}
-				expr = &Symbol{Name: "t"}
+				expr = Symbol("t")
 				args = args[1:]
 				break loop
 			case "isnil":
@@ -249,14 +252,14 @@ loop:
 					return nil, fmt.Errorf("symbol 'isnil' requires 1 argument, got %d: %v", len(args), args)
 				}
 				// TODO: Treat cons constuctions as their own type outside of raw functions?
-				if s, ok := args[0].(*Symbol); ok && s.Name == "nil" {
-					expr = &Symbol{Name: "t"}
+				if s, ok := args[0].(Symbol); ok && s == Symbol("nil") {
+					expr = Symbol("t")
 				} else {
-					expr = &Symbol{Name: "f"}
+					expr = Symbol("f")
 				}
 				args = args[1:]
 			default:
-				return nil, fmt.Errorf("not yet implemented symbol: %s", e.Name)
+				return nil, fmt.Errorf("not yet implemented symbol: %s", e)
 			}
 		case *Ap:
 			// Note: don't eval the right side yet, just push it onto the stack
@@ -273,17 +276,17 @@ loop:
 	return expr, nil
 }
 
-func call(name string, args []Expr, n int, symbols map[string]Expr, f func(args ...*Number) Expr) (Expr, error) {
+func call(name string, args []Expr, n int, symbols map[Symbol]Expr, f func(args ...Number) Expr) (Expr, error) {
 	if len(args) < n {
 		return nil, fmt.Errorf("expected at least %d arguments for '%s', got %d: %v", n, name, len(args), args)
 	}
-	vals := make([]*Number, 0, n)
+	vals := make([]Number, 0, n)
 	for i := 0; i < n; i++ {
 		v, err := eval(args[i], symbols)
 		if err != nil {
 			return nil, fmt.Errorf("error evaluating argument: %w", err)
 		}
-		if n, ok := v.(*Number); ok {
+		if n, ok := v.(Number); ok {
 			vals = append(vals, n)
 		} else {
 			return nil, fmt.Errorf("expected number argument, got: %v", v)
