@@ -83,257 +83,145 @@ func printExpr(expr Expr) string {
 	}
 }
 
-func eval(expr Expr, symbols map[Symbol]Expr) (Expr, error) {
-	originalExpr := expr
+func eval(expr Expr, symbols map[Symbol]Expr) Expr {
+	if a, ok := expr.(*Ap); ok && a.v != nil {
+		return a.v
+	}
+	initialExpr := expr
 	for {
-		if a, ok := expr.(*Ap); ok && a.v != nil {
-			return a.v, nil
-		}
-		newExpr, err := evalInner(expr, symbols)
-		if err != nil {
-			return nil, fmt.Errorf("error evaluating expression: %w", err)
-		}
-		if expr == newExpr {
-			if a, ok := originalExpr.(*Ap); ok {
-				if a.v != nil {
-					panic("shouldn't be here, should have already returned cached value")
-				}
-				fmt.Printf("Caching value for %s: %v\n", printExpr(originalExpr), printExpr(newExpr))
+		result := tryEval(expr, symbols)
+		if result == expr {
+			if a, ok := initialExpr.(*Ap); ok && a.v == nil {
 				a.v = expr
 			}
-			return expr, nil
+			return result
 		}
-		expr = newExpr
+		expr = result
 	}
 }
 
-func evalInner(expr Expr, symbols map[Symbol]Expr) (Expr, error) {
-	fmt.Printf("Evaluating: %T %v %q\n", expr, expr, printExpr(expr))
-	// Walk down the left spine, pushing arguments to app onto a stack and then applying when we reach
-	// a function.
-	args := []Expr{}
-loop:
-	for {
-		fmt.Printf("Walking down: %T %v %q %v\n", expr, expr, printExpr(expr), args)
-		switch e := expr.(type) {
-		case Number:
-			if len(args) > 0 {
-				return nil, fmt.Errorf("unexpected number %v with args %v", e, args)
-			}
-			return e, nil
+const t = Symbol("t")
+const f = Symbol("f")
+const cons = Symbol("cons")
+
+func tryEval(expr Expr, symbols map[Symbol]Expr) Expr {
+	if a, ok := expr.(*Ap); ok && a.v != nil {
+		return a.v
+	}
+	switch e := expr.(type) {
+	case Symbol:
+		if val, ok := symbols[e]; ok {
+			return val
+		}
+	case *Ap:
+		fun := eval(e.Left, symbols)
+		x := e.Right
+		switch fun := fun.(type) {
 		case Symbol:
-			if val, ok := symbols[e]; ok {
-				expr = val
-				continue
-			}
-			switch e {
-			case "add":
-				e, err := call("add", args, 2, symbols, func(vals ...Number) Expr {
-					return Number(vals[0] + vals[1])
-				})
-				if err != nil {
-					return nil, fmt.Errorf("error evaluating 'add': %w", err)
-				}
-				expr = e
-				args = args[2:]
-				break loop
-			case "mul":
-				e, err := call("mul", args, 2, symbols, func(vals ...Number) Expr {
-					return Number(vals[0] * vals[1])
-				})
-				if err != nil {
-					return nil, fmt.Errorf("error evaluating 'mul': %w", err)
-				}
-				expr = e
-				args = args[2:]
-				break loop
-			case "div":
-				e, err := call("div", args, 2, symbols, func(vals ...Number) Expr {
-					return Number(vals[0] / vals[1])
-				})
-				if err != nil {
-					return nil, fmt.Errorf("error evaluating 'div': %w", err)
-				}
-				expr = e
-				args = args[2:]
-				break loop
-			case "eq":
-				e, err := call("eq", args, 2, symbols, func(vals ...Number) Expr {
-					if vals[0] == vals[1] {
-						return Symbol("t")
-					}
-					return Symbol("f")
-				})
-				if err != nil {
-					return nil, fmt.Errorf("error evaluating 'eq': %w", err)
-				}
-				expr = e
-				args = args[2:]
-				break loop
-			case "lt":
-				e, err := call("lt", args, 2, symbols, func(vals ...Number) Expr {
-					if vals[0] < vals[1] {
-						return Symbol("t")
-					}
-					return Symbol("f")
-				})
-				if err != nil {
-					return nil, fmt.Errorf("error evaluating 'lt': %w", err)
-				}
-				expr = e
-				args = args[2:]
-				break loop
+			switch fun {
 			case "neg":
-				e, err := call("neg", args, 1, symbols, func(vals ...Number) Expr {
-					return Number(-vals[0])
-				})
-				if err != nil {
-					return nil, fmt.Errorf("error evaluating 'neg': %w", err)
-				}
-				expr = e
-				args = args[1:]
-				break loop
-			case "s":
-				// ap ap ap s x0 x1 x2   =   ap ap x0 x2 ap x1 x2
-				if len(args) < 3 {
-					return nil, fmt.Errorf("symbol 's' requires 3 arguments, got %d: %v", len(args), args)
-				}
-				expr = &Ap{Left: &Ap{Left: args[0], Right: args[2]}, Right: &Ap{Left: args[1], Right: args[2]}}
-				args = args[3:]
-				break loop
-			case "c":
-				// ap ap ap c x0 x1 x2   =   ap ap x0 x2 x1
-				if len(args) < 3 {
-					return nil, fmt.Errorf("symbol 'c' requires 3 arguments, got %d: %v", len(args), args)
-				}
-				expr = &Ap{Left: &Ap{Left: args[0], Right: args[2]}, Right: args[1]}
-				args = args[3:]
-				break loop
-			case "b":
-				// ap ap ap b x0 x1 x2   =   ap x0 ap x1 x2
-				if len(args) < 3 {
-					return nil, fmt.Errorf("symbol 'b' requires 3 arguments, got %d: %v", len(args), args)
-				}
-				expr = &Ap{Left: args[0], Right: &Ap{Left: args[1], Right: args[2]}}
-				args = args[3:]
-				break loop
-			case "t":
-				// ap ap t x0 x1   =   x0
-				if len(args) < 2 {
-					return nil, fmt.Errorf("symbol 't' requires 2 arguments, got %d: %v", len(args), args)
-				}
-				expr = args[0]
-				args = args[2:]
-				break loop
-			case "f":
-				// ap ap f x0 x1   =   x1
-				if len(args) < 2 {
-					return nil, fmt.Errorf("symbol 'f' requires 2 arguments, got %d: %v", len(args), args)
-				}
-				expr = args[1]
-				args = args[2:]
-				break loop
+				return -eval(x, symbols).(Number)
 			case "i":
-				// ap i x0  =   x0
-				if len(args) < 1 {
-					return nil, fmt.Errorf("symbol 'i' requires 1 argument, got %d: %v", len(args), args)
-				}
-				expr = args[0]
-				args = args[1:]
-				break loop
-			case "cons", "vec":
-				// ap ap ap cons x0 x1 x2   =   ap ap x2 x0 x1
-				if len(args) < 2 {
-					return nil, fmt.Errorf("symbol 'cons' requires 2 arguments, got %d: %v", len(args), args)
-				} else if len(args) == 2 {
-					left, err := eval(args[0], symbols)
-					if err != nil {
-						return nil, fmt.Errorf("error evaluating left argument of 'cons': %w", err)
-					}
-					right, err := eval(args[1], symbols)
-					if err != nil {
-						return nil, fmt.Errorf("error evaluating right argument of 'cons': %w", err)
-					}
-					cons := &Ap{Left: &Ap{Left: Symbol("cons"), Right: left}, Right: right}
-					cons.v = cons
-					expr = cons
-					args = args[2:]
-					break loop
-				} else {
-					expr = &Ap{Left: &Ap{Left: args[2], Right: args[0]}, Right: args[1]}
-					args = args[3:]
-					break loop
-				}
-			case "car":
-				if len(args) < 1 {
-					return nil, fmt.Errorf("symbol 'car' requires 1 argument, got %d: %v", len(args), args)
-				}
-				// ap car x0   =   ap x0 t
-				expr = &Ap{Left: args[0], Right: Symbol("t")}
-				args = args[1:]
-				break loop
-			case "cdr":
-				if len(args) < 1 {
-					return nil, fmt.Errorf("symbol 'cdr' requires 1 argument, got %d: %v", len(args), args)
-				}
-				// ap cdr x0   =   ap x0 f
-				expr = &Ap{Left: args[0], Right: Symbol("f")}
-				args = args[1:]
-				break loop
+				return x
 			case "nil":
-				// ap nil x0   =   t
-				if len(args) < 1 {
-					return e, nil
-				}
-				expr = Symbol("t")
-				args = args[1:]
-				break loop
+				return t
 			case "isnil":
-				if len(args) < 1 {
-					return nil, fmt.Errorf("symbol 'isnil' requires 1 argument, got %d: %v", len(args), args)
-				}
-				// TODO: Treat cons constuctions as their own type outside of raw functions?
-				if s, ok := args[0].(Symbol); ok && s == Symbol("nil") {
-					expr = Symbol("t")
-				} else {
-					expr = Symbol("f")
-				}
-				args = args[1:]
-			default:
-				return nil, fmt.Errorf("not yet implemented symbol: %s", e)
+				return &Ap{x, &Ap{t, &Ap{t, f, nil}, nil}, nil}
+			case "car":
+				return &Ap{x, t, nil}
+			case "cdr":
+				return &Ap{x, f, nil}
 			}
 		case *Ap:
-			// Note: don't eval the right side yet, just push it onto the stack
-			args = append([]Expr{e.Right}, args...)
-			expr = e.Left
-		default:
-			return nil, fmt.Errorf("unknown expression type: %T", expr)
+			fun2 := eval(fun.Left, symbols)
+			y := fun.Right
+			switch fun2 := fun2.(type) {
+			case Symbol:
+				switch fun2 {
+				case "t":
+					return y
+				case "f":
+					return x
+				case "add":
+					return eval(x, symbols).(Number) + eval(y, symbols).(Number)
+				case "mul":
+					return eval(x, symbols).(Number) * eval(y, symbols).(Number)
+				case "div":
+					return eval(y, symbols).(Number) / eval(x, symbols).(Number)
+				case "lt":
+					if eval(y, symbols).(Number) < eval(x, symbols).(Number) {
+						return t
+					}
+					return f
+				case "eq":
+					vx := eval(x, symbols)
+					vy := eval(y, symbols)
+					if vx.(Number) == vy.(Number) {
+						return t
+					}
+					return f
+				case "cons":
+					res := &Ap{Left: &Ap{Left: cons, Right: eval(y, symbols)}, Right: eval(x, symbols)}
+					res.v = res
+					return res
+				}
+			case *Ap:
+				fun3 := eval(fun2.Left, symbols)
+				z := fun2.Right
+				switch fun3 := fun3.(type) {
+				case Symbol:
+					switch fun3 {
+					case "s":
+						return &Ap{Left: &Ap{Left: z, Right: x}, Right: &Ap{Left: y, Right: x}}
+					case "c":
+						return &Ap{Left: &Ap{Left: z, Right: x}, Right: y}
+					case "b":
+						return &Ap{Left: z, Right: &Ap{Left: y, Right: x}}
+					case "cons":
+						return &Ap{Left: &Ap{Left: x, Right: z}, Right: y}
+					}
+				}
+			}
 		}
 	}
-	// Re-apply any remaining arguments
-	for _, arg := range args {
-		expr = &Ap{Left: expr, Right: arg}
-	}
-	return expr, nil
+	return expr
 }
 
-func call(name string, args []Expr, n int, symbols map[Symbol]Expr, f func(args ...Number) Expr) (Expr, error) {
-	if len(args) < n {
-		return nil, fmt.Errorf("expected at least %d arguments for '%s', got %d: %v", n, name, len(args), args)
-	}
-	vals := make([]Number, 0, n)
-	for i := range n {
-		v, err := eval(args[i], symbols)
-		if err != nil {
-			return nil, fmt.Errorf("error evaluating argument: %w", err)
+func toValue(expr Expr) interface{} {
+	switch e := expr.(type) {
+	case Number:
+		return int64(e)
+	case Symbol:
+		if e == "nil" {
+			return []interface{}(nil)
 		}
-		if n, ok := v.(Number); ok {
-			vals = append(vals, n)
-		} else {
-			return nil, fmt.Errorf("expected number argument, got: %v", v)
+		panic(fmt.Sprintf("unexpected symbol: %s", e))
+	case *Ap:
+		switch e2 := e.Left.(type) {
+		case *Ap:
+			switch e3 := e2.Left.(type) {
+			case Symbol:
+				switch e3 {
+				case "cons":
+					right := toValue(e.Right)
+					left := toValue(e2.Right)
+					if rightarr, ok := right.([]interface{}); ok {
+						return append([]interface{}{left}, rightarr...)
+					} else {
+						return struct{ Left, Right interface{} }{Left: left, Right: right}
+					}
+				default:
+					panic(fmt.Sprintf("unexpected Ap.Left: %s", printExpr(e2.Left)))
+				}
+			default:
+				panic(fmt.Sprintf("unexpected Ap.Left: %s", printExpr(e2.Left)))
+			}
+		default:
+			panic(fmt.Sprintf("unexpected Ap.Left: %s", printExpr(e.Left)))
 		}
+	default:
+		panic(fmt.Sprintf("unexpected expr type: %T", expr))
 	}
-	return f(vals...), nil
 }
 
 func doit() error {
