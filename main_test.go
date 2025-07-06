@@ -53,6 +53,22 @@ func TestPowerOf2(t *testing.T) {
 	}
 }
 
+func TestCons(t *testing.T) {
+	for _, testCase := range []struct {
+		input    string
+		expected Expr
+	}{
+		{"ap ap cons 1 nil", &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(1)}, Right: Symbol("nil")}},
+		{"ap ap cons 1 ap ap cons 2 nil", &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(1)}, Right: &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(2)}, Right: Symbol("nil")}}},
+		{"ap ap cons ap ap cons 1 2 ap ap cons 3 4", &Ap{Left: &Ap{Left: Symbol("cons"), Right: &Ap{Left: Number(1), Right: Number(2)}}, Right: &Ap{Left: Symbol("cons"), Right: &Ap{Left: Number(3), Right: Number(4)}}}},
+	} {
+		expr, _ := parseExpr(strings.Split(testCase.input, " "))
+		v, err := eval(expr, map[Symbol]Expr{})
+		assert.NoError(t, err)
+		assert.Equal(t, testCase.expected, v)
+	}
+}
+
 func TestGalaxy(t *testing.T) {
 	symbols, err := parseProgram("galaxy.txt")
 	assert.NoError(t, err)

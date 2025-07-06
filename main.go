@@ -147,6 +147,16 @@ loop:
 				expr = e
 				args = args[2:]
 				break loop
+			case "div":
+				e, err := call("div", args, 2, symbols, func(vals ...Number) Expr {
+					return Number(vals[0] / vals[1])
+				})
+				if err != nil {
+					return nil, fmt.Errorf("error evaluating 'div': %w", err)
+				}
+				expr = e
+				args = args[2:]
+				break loop
 			case "eq":
 				e, err := call("eq", args, 2, symbols, func(vals ...Number) Expr {
 					if vals[0] == vals[1] {
@@ -233,16 +243,47 @@ loop:
 				break loop
 			case "cons", "vec":
 				// ap ap ap cons x0 x1 x2   =   ap ap x2 x0 x1
-				if len(args) < 3 {
-					return nil, fmt.Errorf("symbol 'cons' requires 3 arguments, got %d: %v", len(args), args)
+				if len(args) < 2 {
+					return nil, fmt.Errorf("symbol 'cons' requires 2 arguments, got %d: %v", len(args), args)
+				} else if len(args) == 2 {
+					left, err := eval(args[0], symbols)
+					if err != nil {
+						return nil, fmt.Errorf("error evaluating left argument of 'cons': %w", err)
+					}
+					right, err := eval(args[1], symbols)
+					if err != nil {
+						return nil, fmt.Errorf("error evaluating right argument of 'cons': %w", err)
+					}
+					cons := &Ap{Left: &Ap{Left: Symbol("cons"), Right: left}, Right: right}
+					cons.v = cons
+					expr = cons
+					args = args[2:]
+					break loop
+				} else {
+					expr = &Ap{Left: &Ap{Left: args[2], Right: args[0]}, Right: args[1]}
+					args = args[3:]
+					break loop
 				}
-				expr = &Ap{Left: &Ap{Left: args[2], Right: args[0]}, Right: args[1]}
-				args = args[3:]
+			case "car":
+				if len(args) < 1 {
+					return nil, fmt.Errorf("symbol 'car' requires 1 argument, got %d: %v", len(args), args)
+				}
+				// ap car x0   =   ap x0 t
+				expr = &Ap{Left: args[0], Right: Symbol("t")}
+				args = args[1:]
+				break loop
+			case "cdr":
+				if len(args) < 1 {
+					return nil, fmt.Errorf("symbol 'cdr' requires 1 argument, got %d: %v", len(args), args)
+				}
+				// ap cdr x0   =   ap x0 f
+				expr = &Ap{Left: args[0], Right: Symbol("f")}
+				args = args[1:]
 				break loop
 			case "nil":
 				// ap nil x0   =   t
 				if len(args) < 1 {
-					return nil, fmt.Errorf("symbol 'nil' requires 1 argument, got %d: %v", len(args), args)
+					return e, nil
 				}
 				expr = Symbol("t")
 				args = args[1:]
@@ -281,7 +322,7 @@ func call(name string, args []Expr, n int, symbols map[Symbol]Expr, f func(args 
 		return nil, fmt.Errorf("expected at least %d arguments for '%s', got %d: %v", n, name, len(args), args)
 	}
 	vals := make([]Number, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		v, err := eval(args[i], symbols)
 		if err != nil {
 			return nil, fmt.Errorf("error evaluating argument: %w", err)
