@@ -135,10 +135,10 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 		Right: Number(req.Point.Y),
 	}
 
-	// Call interact function with state and point: ap ap interact state point
-	// Check if interact function exists in galaxy
-	if _, exists := galaxy[Symbol("interact")]; !exists {
-		// If interact function doesn't exist, return a default response
+	// Call galaxy function with state and point: ap ap galaxy state point
+	// Check if galaxy function exists
+	if _, exists := galaxy[Symbol("galaxy")]; !exists {
+		// If galaxy function doesn't exist, return a default response
 		json.NewEncoder(w).Encode(InteractResponse{
 			NewState: req.State,       // Return the same state
 			Images:   [][]PointPair{}, // Empty images
@@ -148,7 +148,7 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 
 	interactExpr := &Ap{
 		Left: &Ap{
-			Left:  Symbol("interact"),
+			Left:  Symbol("galaxy"),
 			Right: stateExpr,
 		},
 		Right: pointExpr,
@@ -172,20 +172,25 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 
-		// Parse the result which should be a cons of (newState, images)
+		// Parse the result which should be a galaxy response: [flag, newState, images]
 		resultValue := toValue(result)
-		if resultSlice, ok := resultValue.([]interface{}); ok && len(resultSlice) == 2 {
-			// First element is the new state
-			if stateResult, ok := resultSlice[0].([]interface{}); ok {
+		if resultSlice, ok := resultValue.([]interface{}); ok && len(resultSlice) == 3 {
+			// First element is a flag (usually 0)
+			// Second element is the new state
+			if stateResult := resultSlice[1]; stateResult != nil {
 				// Convert state back to expression string
-				stateExprResult := valueToExpr(stateResult)
-				newState = printExpr(stateExprResult)
+				if stateSlice, ok := stateResult.([]interface{}); ok {
+					stateExprResult := valueToExpr(stateSlice)
+					newState = printExpr(stateExprResult)
+				} else {
+					newState = fmt.Sprintf("%v", stateResult)
+				}
 			} else {
-				newState = fmt.Sprintf("%v", resultSlice[0])
+				newState = "nil"
 			}
 
-			// Second element is the images
-			if imagesResult, ok := resultSlice[1].([]interface{}); ok {
+			// Third element is the images
+			if imagesResult, ok := resultSlice[2].([]interface{}); ok {
 				images = parseImages(imagesResult)
 			}
 		} else {
