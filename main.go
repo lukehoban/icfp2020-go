@@ -8,14 +8,14 @@ import (
 	"strings"
 )
 
-var globalProgram map[Symbol]Expr
+var galaxy map[Symbol]Expr
 
 func init() {
 	program, err := parseProgram("./galaxy.txt")
 	if err != nil {
 		log.Fatalf("failed to parse program: %v", err)
 	}
-	globalProgram = program
+	galaxy = program
 }
 
 type InteractRequest struct {
@@ -59,7 +59,7 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Evaluate the expression
-	result := eval(expr, globalProgram)
+	result := eval(expr, galaxy)
 
 	// Try to convert to a value, handle panics for unsupported expressions
 	var value interface{}

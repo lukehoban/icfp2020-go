@@ -183,11 +183,11 @@ func TestRootEndpoint(t *testing.T) {
 }
 
 // Test helper to ensure the global program is loaded
-func TestGlobalProgramLoaded(t *testing.T) {
-	if globalProgram == nil {
-		t.Error("globalProgram should be loaded during init")
+func TestGalaxyLoaded(t *testing.T) {
+	if galaxy == nil {
+		t.Error("galaxy should be loaded during init")
 	}
-	if len(globalProgram) == 0 {
-		t.Error("globalProgram should contain parsed symbols")
+	if len(galaxy) == 0 {
+		t.Error("galaxy should contain parsed symbols")
 	}
 }
