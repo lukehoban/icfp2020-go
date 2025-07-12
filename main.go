@@ -427,6 +427,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
             let minY = Infinity, maxY = -Infinity;
 
             for (const image of images) {
+			    if (image == null) continue;
                 for (const point of image) {
                     minX = Math.min(minX, point.x);
                     maxX = Math.max(maxX, point.x);
