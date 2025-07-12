@@ -183,7 +183,12 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 					stateExprResult := valueToExpr(stateSlice)
 					newState = printExpr(stateExprResult)
 				} else {
-					newState = fmt.Sprintf("%v", stateResult)
+					// For simple values like numbers or symbols
+					if stateExpr := valueToExpr(stateResult); stateExpr != nil {
+						newState = printExpr(stateExpr)
+					} else {
+						newState = fmt.Sprintf("%v", stateResult)
+					}
 				}
 			} else {
 				newState = "nil"
@@ -218,8 +223,24 @@ func valueToExpr(value interface{}) Expr {
 	case string:
 		return Symbol(v)
 	case []interface{}:
-		if len(v) == 2 {
+		if len(v) == 0 {
+			return Symbol("nil")
+		} else if len(v) == 2 {
 			return &Ap{Left: valueToExpr(v[0]), Right: valueToExpr(v[1])}
+		} else {
+			// Convert multi-element array to nested cons structure
+			// [a, b, c, d] becomes cons(a, cons(b, cons(c, d)))
+			result := valueToExpr(v[len(v)-1]) // Start with the last element
+			for i := len(v) - 2; i >= 0; i-- {
+				result = &Ap{
+					Left: &Ap{
+						Left:  Symbol("cons"),
+						Right: valueToExpr(v[i]),
+					},
+					Right: result,
+				}
+			}
+			return result
 		}
 	}
 	return Symbol("nil")
