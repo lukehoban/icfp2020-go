@@ -458,6 +458,8 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
             // Render each image layer with different colors
             images.forEach((image, layerIndex) => {
+                if (!image) return; // Skip null/undefined images
+                
                 const color = colors[layerIndex % colors.length];
                 ctx.fillStyle = color;
                 ctx.strokeStyle = color;
