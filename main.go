@@ -255,30 +255,82 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     <title>Galaxy Interpreter</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        .section h2 { margin-top: 0; }
         textarea { width: 100%; height: 100px; margin: 10px 0; }
-        button { padding: 10px 20px; font-size: 16px; }
+        input[type="number"] { width: 80px; margin: 5px; }
+        button { padding: 10px 20px; font-size: 16px; margin: 5px; }
         .result { margin-top: 20px; padding: 10px; background: #f0f0f0; border-radius: 5px; }
         .error { background: #ffe6e6; color: #cc0000; }
+        .canvas-container { margin: 20px 0; text-align: center; }
+        canvas { border: 2px solid #333; background: white; }
+        .controls { margin: 10px 0; }
+        .state-display { background: #f8f8f8; padding: 10px; border-radius: 5px; font-family: monospace; white-space: pre-wrap; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Galaxy Interpreter</h1>
-        <p>Enter a galaxy expression to evaluate:</p>
-        <textarea id="expression" placeholder="Example: ap add 1 2"></textarea>
-        <br>
-        <button onclick="evaluateExpression()">Evaluate</button>
-        <div id="result" class="result" style="display: none;"></div>
+        
+        <div class="section">
+            <h2>Expression Evaluator</h2>
+            <p>Enter a galaxy expression to evaluate:</p>
+            <textarea id="expression" placeholder="Example: ap ap add 1 2"></textarea>
+            <br>
+            <button onclick="evaluateExpression()">Evaluate</button>
+            <div id="evalResult" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Galaxy Interaction</h2>
+            <p>Interact with the galaxy by providing a state and clicking coordinates:</p>
+            
+            <div class="controls">
+                <label>State: <textarea id="state" placeholder="nil">nil</textarea></label>
+                <br>
+                <label>X: <input type="number" id="pointX" value="0"></label>
+                <label>Y: <input type="number" id="pointY" value="0"></label>
+                <button onclick="interact()">Interact</button>
+                <button onclick="resetState()">Reset State</button>
+            </div>
+
+            <div class="canvas-container">
+                <canvas id="galaxyCanvas" width="400" height="400"></canvas>
+                <p><em>Click on the canvas to interact with those coordinates</em></p>
+            </div>
+
+            <div>
+                <h3>Current State:</h3>
+                <div id="stateDisplay" class="state-display">nil</div>
+            </div>
+            
+            <div id="interactResult" class="result" style="display: none;"></div>
+        </div>
     </div>
 
     <script>
+        const canvas = document.getElementById('galaxyCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Colors for different image layers
+        const colors = [
+            '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF',
+            '#800080', '#FFA500', '#008000', '#000080', '#800000', '#808000'
+        ];
+
+        let currentState = 'nil';
+        let canvasScale = 1;
+        let canvasOffsetX = 0;
+        let canvasOffsetY = 0;
+
+        // Expression evaluator (existing functionality)
         async function evaluateExpression() {
             const expression = document.getElementById('expression').value.trim();
-            const resultDiv = document.getElementById('result');
+            const resultDiv = document.getElementById('evalResult');
             
             if (!expression) {
-                showResult('Please enter an expression', true);
+                showEvalResult('Please enter an expression', true);
                 return;
             }
 
@@ -294,29 +346,188 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
                 const data = await response.json();
                 
                 if (data.error) {
-                    showResult('Error: ' + data.error, true);
+                    showEvalResult('Error: ' + data.error, true);
                 } else {
-                    showResult('Result: ' + JSON.stringify(data.result, null, 2), false);
+                    showEvalResult('Result: ' + JSON.stringify(data.result, null, 2), false);
                 }
             } catch (error) {
-                showResult('Network error: ' + error.message, true);
+                showEvalResult('Network error: ' + error.message, true);
             }
         }
 
-        function showResult(message, isError) {
-            const resultDiv = document.getElementById('result');
+        function showEvalResult(message, isError) {
+            const resultDiv = document.getElementById('evalResult');
             resultDiv.textContent = message;
             resultDiv.className = 'result' + (isError ? ' error' : '');
             resultDiv.style.display = 'block';
         }
 
-        // Allow Enter key to evaluate
+        // Galaxy interaction functionality
+        async function interact() {
+            const state = document.getElementById('state').value.trim() || 'nil';
+            const x = parseInt(document.getElementById('pointX').value) || 0;
+            const y = parseInt(document.getElementById('pointY').value) || 0;
+            
+            await performInteraction(state, x, y);
+        }
+
+        async function performInteraction(state, x, y) {
+            const resultDiv = document.getElementById('interactResult');
+            
+            try {
+                const response = await fetch('/interact', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        state: state,
+                        point: { x: x, y: y }
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    showInteractResult('Error: ' + data.error, true);
+                } else {
+                    currentState = data.newstate;
+                    document.getElementById('state').value = currentState;
+                    document.getElementById('stateDisplay').textContent = currentState;
+                    
+                    renderImages(data.images);
+                    
+                    showInteractResult('Interaction successful. Images: ' + data.images.length + ' layers', false);
+                }
+            } catch (error) {
+                showInteractResult('Network error: ' + error.message, true);
+            }
+        }
+
+        function showInteractResult(message, isError) {
+            const resultDiv = document.getElementById('interactResult');
+            resultDiv.textContent = message;
+            resultDiv.className = 'result' + (isError ? ' error' : '');
+            resultDiv.style.display = 'block';
+        }
+
+        function renderImages(images) {
+            if (!images || images.length === 0) {
+                clearCanvas();
+                return;
+            }
+
+            // Calculate bounding box for all points
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+
+            for (const image of images) {
+                for (const point of image) {
+                    minX = Math.min(minX, point.x);
+                    maxX = Math.max(maxX, point.x);
+                    minY = Math.min(minY, point.y);
+                    maxY = Math.max(maxY, point.y);
+                }
+            }
+
+            // Add padding
+            const padding = 20;
+            const width = Math.max(maxX - minX + 2 * padding, 100);
+            const height = Math.max(maxY - minY + 2 * padding, 100);
+
+            // Calculate scale to fit canvas
+            const maxCanvasSize = 400;
+            canvasScale = Math.min(maxCanvasSize / width, maxCanvasSize / height);
+            
+            // Update canvas size
+            canvas.width = Math.ceil(width * canvasScale);
+            canvas.height = Math.ceil(height * canvasScale);
+            
+            // Calculate offset to center the content
+            canvasOffsetX = (minX - padding) * canvasScale;
+            canvasOffsetY = (minY - padding) * canvasScale;
+
+            // Clear canvas
+            clearCanvas();
+
+            // Render each image layer with different colors
+            images.forEach((image, layerIndex) => {
+                const color = colors[layerIndex % colors.length];
+                ctx.fillStyle = color;
+                ctx.strokeStyle = color;
+                
+                // Draw points
+                image.forEach(point => {
+                    const screenX = point.x * canvasScale - canvasOffsetX;
+                    const screenY = point.y * canvasScale - canvasOffsetY;
+                    
+                    // Draw a small circle for each point
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, 2, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            });
+        }
+
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid for reference
+            ctx.strokeStyle = '#f0f0f0';
+            ctx.lineWidth = 1;
+            
+            const gridSize = 20 * canvasScale;
+            if (gridSize > 5) {
+                for (let x = 0; x < canvas.width; x += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, canvas.height);
+                    ctx.stroke();
+                }
+                for (let y = 0; y < canvas.height; y += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(canvas.width, y);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function resetState() {
+            currentState = 'nil';
+            document.getElementById('state').value = 'nil';
+            document.getElementById('stateDisplay').textContent = 'nil';
+            clearCanvas();
+            document.getElementById('interactResult').style.display = 'none';
+        }
+
+        // Canvas click handler
+        canvas.addEventListener('click', function(event) {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+            
+            // Convert screen coordinates to galaxy coordinates
+            const galaxyX = Math.round((clickX + canvasOffsetX) / canvasScale);
+            const galaxyY = Math.round((clickY + canvasOffsetY) / canvasScale);
+            
+            document.getElementById('pointX').value = galaxyX;
+            document.getElementById('pointY').value = galaxyY;
+            
+            // Automatically perform interaction
+            performInteraction(currentState, galaxyX, galaxyY);
+        });
+
+        // Allow Enter key to evaluate expressions
         document.getElementById('expression').addEventListener('keypress', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 evaluateExpression();
             }
         });
+
+        // Initialize canvas
+        clearCanvas();
     </script>
 </body>
 </html>`
