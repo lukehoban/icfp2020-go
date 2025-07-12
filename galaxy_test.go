@@ -8,6 +8,22 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// clearCache recursively clears the v field from Ap expressions for testing
+func clearCache(expr Expr) Expr {
+	switch e := expr.(type) {
+	case *Ap:
+		return &Ap{
+			Left:  clearCache(e.Left),
+			Right: clearCache(e.Right),
+			v:     nil,
+		}
+	case Number, Symbol:
+		return e
+	default:
+		return expr
+	}
+}
+
 func TestPowerOf2(t *testing.T) {
 
 	pwr2 := "ap ap s ap ap c ap eq 0 1 ap ap b ap mul 2 ap ap b pwr2 ap add -1"
@@ -59,11 +75,13 @@ func TestCons(t *testing.T) {
 	}{
 		{"ap ap cons 1 nil", &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(1)}, Right: Symbol("nil")}},
 		{"ap ap cons 1 ap ap cons 2 nil", &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(1)}, Right: &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(2)}, Right: Symbol("nil")}}},
-		{"ap ap cons ap ap cons 1 2 ap ap cons 3 4", &Ap{Left: &Ap{Left: Symbol("cons"), Right: &Ap{Left: Number(1), Right: Number(2)}}, Right: &Ap{Left: Symbol("cons"), Right: &Ap{Left: Number(3), Right: Number(4)}}}},
+		{"ap ap cons ap ap cons 1 2 ap ap cons 3 4", &Ap{Left: &Ap{Left: Symbol("cons"), Right: &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(1)}, Right: Number(2)}}, Right: &Ap{Left: &Ap{Left: Symbol("cons"), Right: Number(3)}, Right: Number(4)}}},
 	} {
 		expr, _ := parseExpr(strings.Split(testCase.input, " "))
 		v := eval(expr, map[Symbol]Expr{})
-		assert.Equal(t, testCase.expected, v)
+		// Clear cache for comparison
+		cleanV := clearCache(v)
+		assert.Equal(t, testCase.expected, cleanV)
 	}
 }
 
@@ -75,8 +93,47 @@ func TestGalaxy(t *testing.T) {
 	v := eval(expr, symbols)
 	assert.Equal(t, "ap ap cons 0 ap ap cons ap ap cons 0 ap ap cons ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil ap ap cons ap ap cons ap ap cons ap ap cons -1 -3 ap ap cons ap ap cons 0 -3 ap ap cons ap ap cons 1 -3 ap ap cons ap ap cons 2 -2 ap ap cons ap ap cons -2 -1 ap ap cons ap ap cons -1 -1 ap ap cons ap ap cons 0 -1 ap ap cons ap ap cons 3 -1 ap ap cons ap ap cons -3 0 ap ap cons ap ap cons -1 0 ap ap cons ap ap cons 1 0 ap ap cons ap ap cons 3 0 ap ap cons ap ap cons -3 1 ap ap cons ap ap cons 0 1 ap ap cons ap ap cons 1 1 ap ap cons ap ap cons 2 1 ap ap cons ap ap cons -2 2 ap ap cons ap ap cons -1 3 ap ap cons ap ap cons 0 3 ap ap cons ap ap cons 1 3 nil ap ap cons ap ap cons ap ap cons -7 -3 ap ap cons ap ap cons -8 -2 nil ap ap cons nil nil nil", printExpr(v))
 	raw := toValue(v)
-	assert.Equal(t, []interface{}{}, raw)
-	// ap ap cons 0 ap ap cons ap ap cons 0 ap ap cons ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil ap ap cons ap ap cons ap ap cons ap ap cons -1 -3 ap ap cons ap ap cons 0 -3 ap ap cons ap ap cons 1 -3 ap ap cons ap ap cons 2 -2 ap ap cons ap ap cons -2 -1 ap ap cons ap ap cons -1 -1 ap ap cons ap ap cons 0 -1 ap ap cons ap ap cons 3 -1 ap ap cons ap ap cons -3 0 ap ap cons ap ap cons -1 0 ap ap cons ap ap cons 1 0 ap ap cons ap ap cons 3 0 ap ap cons ap ap cons -3 1 ap ap cons ap ap cons 0 1 ap ap cons ap ap cons 1 1 ap ap cons ap ap cons 2 1 ap ap cons ap ap cons -2 2 ap ap cons ap ap cons -1 3 ap ap cons ap ap cons 0 3 ap ap cons ap ap cons 1 3 nil ap ap cons ap ap cons ap ap cons -7 -3 ap ap cons ap ap cons -8 -2 nil ap ap cons nil nil nil
-	//
 
+	// The galaxy function returns a complex structure representing game state
+	// [0 [0 [0] 0 []] [[coordinates...] [other_coordinates...] []]]
+	expected := []interface{}{
+		int64(0),
+		[]interface{}{
+			int64(0),
+			[]interface{}{int64(0)},
+			int64(0),
+			[]interface{}(nil),
+		},
+		[]interface{}{
+			[]interface{}{
+				struct{ Left, Right interface{} }{Left: int64(-1), Right: int64(-3)},
+				struct{ Left, Right interface{} }{Left: int64(0), Right: int64(-3)},
+				struct{ Left, Right interface{} }{Left: int64(1), Right: int64(-3)},
+				struct{ Left, Right interface{} }{Left: int64(2), Right: int64(-2)},
+				struct{ Left, Right interface{} }{Left: int64(-2), Right: int64(-1)},
+				struct{ Left, Right interface{} }{Left: int64(-1), Right: int64(-1)},
+				struct{ Left, Right interface{} }{Left: int64(0), Right: int64(-1)},
+				struct{ Left, Right interface{} }{Left: int64(3), Right: int64(-1)},
+				struct{ Left, Right interface{} }{Left: int64(-3), Right: int64(0)},
+				struct{ Left, Right interface{} }{Left: int64(-1), Right: int64(0)},
+				struct{ Left, Right interface{} }{Left: int64(1), Right: int64(0)},
+				struct{ Left, Right interface{} }{Left: int64(3), Right: int64(0)},
+				struct{ Left, Right interface{} }{Left: int64(-3), Right: int64(1)},
+				struct{ Left, Right interface{} }{Left: int64(0), Right: int64(1)},
+				struct{ Left, Right interface{} }{Left: int64(1), Right: int64(1)},
+				struct{ Left, Right interface{} }{Left: int64(2), Right: int64(1)},
+				struct{ Left, Right interface{} }{Left: int64(-2), Right: int64(2)},
+				struct{ Left, Right interface{} }{Left: int64(-1), Right: int64(3)},
+				struct{ Left, Right interface{} }{Left: int64(0), Right: int64(3)},
+				struct{ Left, Right interface{} }{Left: int64(1), Right: int64(3)},
+			},
+			[]interface{}{
+				struct{ Left, Right interface{} }{Left: int64(-7), Right: int64(-3)},
+				struct{ Left, Right interface{} }{Left: int64(-8), Right: int64(-2)},
+			},
+			[]interface{}(nil),
+		},
+	}
+
+	assert.Equal(t, expected, raw)
 }
