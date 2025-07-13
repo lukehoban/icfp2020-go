@@ -187,6 +187,11 @@ func tryEval(expr Expr, symbols map[Symbol]Expr) Expr {
 	return expr
 }
 
+type Pair struct {
+	Left  interface{}
+	Right interface{}
+}
+
 func toValue(expr Expr) interface{} {
 	switch e := expr.(type) {
 	case Number:
@@ -208,7 +213,7 @@ func toValue(expr Expr) interface{} {
 					if rightarr, ok := right.([]interface{}); ok {
 						return append([]interface{}{left}, rightarr...)
 					} else {
-						return struct{ Left, Right interface{} }{Left: left, Right: right}
+						return Pair{Left: left, Right: right}
 					}
 				default:
 					panic(fmt.Sprintf("unexpected Ap.Left: %s", printExpr(e2.Left)))
@@ -222,4 +227,20 @@ func toValue(expr Expr) interface{} {
 	default:
 		panic(fmt.Sprintf("unexpected expr type: %T", expr))
 	}
+}
+
+func valueToExpr(value interface{}) Expr {
+	switch v := value.(type) {
+	case int64:
+		return Number(v)
+	case Pair:
+		return &Ap{Left: &Ap{Left: Symbol("cons"), Right: valueToExpr(v.Left)}, Right: valueToExpr(v.Right)}
+	case []interface{}:
+		var result Expr = Symbol("nil")
+		for i := len(v) - 1; i >= 0; i-- {
+			result = &Ap{Left: &Ap{Left: Symbol("cons"), Right: valueToExpr(v[i])}, Right: result}
+		}
+		return result
+	}
+	return Symbol("nil")
 }

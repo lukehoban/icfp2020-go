@@ -36,14 +36,15 @@ type InteractRequest struct {
 }
 
 type InteractResponse struct {
+	Flag     int64         `json:"flag"`
 	NewState string        `json:"newstate"`
 	Images   [][]PointPair `json:"images"`
 	Error    string        `json:"error,omitempty"`
 }
 
 type PointPair struct {
-	X int `json:"x"`
-	Y int `json:"y"`
+	X int64 `json:"x"`
+	Y int64 `json:"y"`
 }
 
 func evalHandler(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +147,7 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("Debug - interaction with state: %s\n", printExpr(stateExpr))
 	interactExpr := &Ap{
 		Left: &Ap{
 			Left:  Symbol("galaxy"),
@@ -154,10 +156,29 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 		Right: pointExpr,
 	}
 
-	// Evaluate the interaction
-	result := eval(interactExpr, galaxy)
+	// Evaluate the interaction with proper error handling
+	var result Expr
+	var evalError error
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				evalError = fmt.Errorf("evaluation failed: %v", r)
+			}
+		}()
+		result = eval(interactExpr, galaxy)
+	}()
+
+	if evalError != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(InteractResponse{Error: evalError.Error()})
+		return
+	}
+
+	fmt.Printf("Debug - interaction result: %s %v\n", printExpr(result), toValue(result))
 
 	// Try to convert the result to the expected format
+	var flag int64
 	var newState string
 	var images [][]PointPair
 	var responseSent bool
@@ -165,6 +186,7 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
+				fmt.Printf("Debug - interaction result conversion failed: %v\n", r)
 				// If parsing fails, return error
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(InteractResponse{Error: "Failed to process interaction result"})
@@ -174,98 +196,33 @@ func interactHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Parse the result which should be a galaxy response: [flag, newState, images]
 		resultValue := toValue(result)
-		if resultSlice, ok := resultValue.([]interface{}); ok && len(resultSlice) == 3 {
-			// First element is a flag (usually 0)
-			// Second element is the new state
-			if stateResult := resultSlice[1]; stateResult != nil {
-				// Convert state back to expression string
-				if stateSlice, ok := stateResult.([]interface{}); ok {
-					stateExprResult := valueToExpr(stateSlice)
-					newState = printExpr(stateExprResult)
-				} else {
-					// For simple values like numbers or symbols
-					if stateExpr := valueToExpr(stateResult); stateExpr != nil {
-						newState = printExpr(stateExpr)
-					} else {
-						newState = fmt.Sprintf("%v", stateResult)
-					}
-				}
-			} else {
-				newState = "nil"
-			}
-
-			// Third element is the images
-			if imagesResult, ok := resultSlice[2].([]interface{}); ok {
-				images = parseImages(imagesResult)
-			}
-		} else {
-			// If result doesn't match expected format, return string representation
-			newState = printExpr(result)
-			images = [][]PointPair{}
-		}
+		resultSlice := resultValue.([]interface{})
+		flag = resultSlice[0].(int64)
+		newState = printExpr(valueToExpr(resultSlice[1]))
+		images = parseImages(resultSlice[2])
 	}()
 
 	if !responseSent {
 		json.NewEncoder(w).Encode(InteractResponse{
+			Flag:     flag,
 			NewState: newState,
 			Images:   images,
 		})
 	}
 }
 
-// Helper function to convert a value back to an expression
-func valueToExpr(value interface{}) Expr {
-	switch v := value.(type) {
-	case int64:
-		return Number(v)
-	case float64:
-		return Number(int64(v))
-	case string:
-		return Symbol(v)
-	case []interface{}:
-		if len(v) == 0 {
-			return Symbol("nil")
-		} else if len(v) == 2 {
-			return &Ap{Left: valueToExpr(v[0]), Right: valueToExpr(v[1])}
-		} else {
-			// Convert multi-element array to nested cons structure
-			// [a, b, c, d] becomes cons(a, cons(b, cons(c, d)))
-			result := valueToExpr(v[len(v)-1]) // Start with the last element
-			for i := len(v) - 2; i >= 0; i-- {
-				result = &Ap{
-					Left: &Ap{
-						Left:  Symbol("cons"),
-						Right: valueToExpr(v[i]),
-					},
-					Right: result,
-				}
-			}
-			return result
-		}
-	}
-	return Symbol("nil")
-}
-
 // Helper function to parse images from the result
-func parseImages(imagesValue []interface{}) [][]PointPair {
+func parseImages(imagesValue interface{}) [][]PointPair {
 	var images [][]PointPair
-
-	for _, imageValue := range imagesValue {
-		if imageSlice, ok := imageValue.([]interface{}); ok {
-			var points []PointPair
-			for _, pointValue := range imageSlice {
-				if pointStruct, ok := pointValue.(struct{ Left, Right interface{} }); ok {
-					if x, ok := pointStruct.Left.(int64); ok {
-						if y, ok := pointStruct.Right.(int64); ok {
-							points = append(points, PointPair{X: int(x), Y: int(y)})
-						}
-					}
-				}
-			}
-			images = append(images, points)
+	for _, imageValue := range imagesValue.([]interface{}) {
+		images = append(images, []PointPair{})
+		for _, pointValue := range imageValue.([]interface{}) {
+			images[len(images)-1] = append(images[len(images)-1], PointPair{
+				X: pointValue.(Pair).Left.(int64),
+				Y: pointValue.(Pair).Right.(int64),
+			})
 		}
 	}
-
 	return images
 }
 
